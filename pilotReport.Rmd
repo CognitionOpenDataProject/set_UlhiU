@@ -8,7 +8,6 @@ output:
 
 #### Article ID: UlhiU
 #### Pilot: Kyle MacDonald
-#### Co-pilot: Tom Hardwicke  
 #### Start date: 4/4/17
 #### End date: 4/10/17
 
