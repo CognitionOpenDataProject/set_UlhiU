@@ -439,9 +439,11 @@ codReport(Report_Type = 'joint',
           Author_Assistance = FALSE)
 ```
 
-In summary, the outcome of this report is a failure since I was not able to reproduce the probabilities in Table 2. The two main issues were: (1) as far as I could tell, the authors did not include the C-alone trials in the published data and (2) I was not able to reproduce the number of participants removed for the two face types using their filtering criterion (and these participants were not flagged in their data file). However, it's possible that I was not implementing the criterion correctly. In contrast to the descriptive statistics, I was able to reproduce the key inferential statistics from the paper. 
+In summary, the outcome of this report is a partial failure since we were not able to reproduce the probabilities in Table 2. 
 
-There were also several important pieces of information that were not clearly described in the results section: (1) information about needing to compute probabilities for each participant before averaging across participants was located in the caption of Table 3 and (2) information about the "optimizer" filtering criterion was in the model description section of the introduction (2.2.1. Optimal model). 
+The two main issues were: (1) the authors did not include the C-alone trials in the published data and (2) we were not able to reproduce the number of participants removed for the two face types using their filtering criterion (and these participants were not flagged in their data file). 
+
+In contrast to the descriptive statistics, we were able to reproduce the key inferential statistics from the paper, with only one minor numerical error. 
 
 ```{r session_info, include=TRUE, echo=TRUE, results='markup'}
 devtools::session_info()
