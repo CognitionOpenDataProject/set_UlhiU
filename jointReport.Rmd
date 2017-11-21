@@ -65,11 +65,11 @@ Here's the data description provided by Wang & Busemeyer for Experiment 1 in the
 
 Skip reading in the first row since it encodes information about face type and not the variable names. 
 
-```{r}
+```{r, eval = F}
 d <- readxl::read_excel("data/data.xlsx", skip = 1)
 ```
 
-KM: Here we are trying to reproduce the analyses using two data files provided by the authors after asking for their assistance. 
+NB: Here we reproduce the analyses using two data files provided by the authors after asking for their assistance. 
 
 ```{r}
 d_good <- read.table("authorAssistance/GFq.txt")
@@ -80,7 +80,13 @@ colnames(d_good) <- c("Good&Friendly", "Good&Attack",	"Bad&Friendly",
 d_bad <- read.table("authorAssistance/BFq.txt")
 colnames(d_bad) <- c("Good&Friendly", "Good&Attack", "Bad&Friendly",	
                      "Bad&Attack",	"Friendly (D-alone)", "Friendly (C-alone)")
+```
 
+## Step 3: Tidy data
+
+Add a participant ID column, so we don't lose this information when we convert from wide to long format in Step 3. Each row is data for an individual participant. We also add the information about face type as a variable.
+
+```{r}
 # add the face type 
 d_good %<>% mutate(face_type = "type_g",
                    id = 1:n())
@@ -91,31 +97,6 @@ d_bad %<>% mutate(face_type = "type_b",
 d_tidy <- bind_rows(d_good, d_bad)
 ```
 
-## Step 3: Tidy data
-
-Add a participant ID column, so we don't lose this information when we convert from wide to long format in Step 3. Each row is data for an individual participant.
-
-```{r}
-d$id <- 1:nrow(d)
-```
-
-Split the dataset using column position, so I can add the information about face type as a variable. Columns 1-5 are type g faces and columns 6-10 are type b faces. 
-
-```{r}
-# split data
-d_typeg <- bind_cols(d[1:5], d['id'])
-d_typeb <- bind_cols(d[6:10], d['id'])
-
-# add the face type 
-d_typeg %<>% mutate(face_type = "type_g")
-d_typeb %<>% mutate(face_type = "type_b")  
-
-# typeb is read into R with __1 appended to column names, remove this
-names(d_typeb) <- str_replace(names(d_typeb), "__1", "")
-
-# put the data frames back together in "longer" format
-d_tidy <- bind_rows(d_typeb, d_typeg)
-```
 
 Add the frequency of attack responses for the D-alone trials. This information was not included in the dataset, but we know there were 17 test trials for each face type for each participant. From the results section 3.2, 
 
@@ -194,7 +175,7 @@ n_tidy <- d_tidy_l %>%
   distinct(id) %>% 
   nrow()
 
-n_tidy == nrow(d)
+n_tidy == 169
 ```
 
 How many responses do we have for each participant? We don't have data for the C-alone trials, so my best guess is that we should expect 68 total responses for each participant (2 face types X 2 blocks X 17 trials in each block). 
@@ -212,7 +193,7 @@ sum(resp_check) == 169
 
 Each participant has 68 total responses. Thus, we now have tidy data in long format with the correct number of participants and trials. 
 
-NB: after author assistance we now have 102 trials for each participant. 
+NB: after author assistance we now have all the data (102 trials) for each participant. 
 
 Are all participants represented in the data? From Wang & Busmeyer, 
 
@@ -228,22 +209,58 @@ In any case, in the text, it's stated that:
 
 > The statistical tests were computed using all 169 participants. (p. 138)
 
-In any case, we move forward with the full, unfiltered dataset. 
+So we keep the full, unfiltered dataset for computing the inferential stats later on in the analysis.
 
 ```{r}
-d_analysis <- d_tidy_l
+d_analysis_unfilt <- d_tidy_l
 ```
 
 NB: After author assistance, we can better implement their filtering criteria. Specifically, they say: 
 
 > We only included participants that made at least one incorrect categorization of a type of face. That is: Only Ps that categorized Good at least once when face was b = bad guy type face. Only Ps that categorized Bad at least once when face was g = good guy type face.
 
-So we filter out participants who did not make any incorrect classifications for either the good or bad face types. We expect that: $N_{bad} = 126 = 169 - 43$ and $N_{good} = 138 = 169 - 31$
+> As said above, 169 saw bad faces, 43 of these always categorized this as bad (zero good face categories when it was a b = bad type face); 169 saw good faces, 31 of these always categorized this as a good face (zero bad guy face categories when it was a g = good guy type face).
+
+So we filter out participants who did not make any incorrect classifications for either the good or bad face types. We expect to get: $N_{bad} = 126 = 169 - 43$ and $N_{good} = 138 = 169 - 31$
 
 ```{r}
-d_tidy_l %>% 
+d_filtered <- d_tidy_l %>%
+  filter(trial_type == "C-D") %>% 
+  group_by(id, face_type, cat_decision) %>% 
+  summarise(freq_response = sum(freq_response)) %>% 
+  mutate(optimizer = ifelse(freq_response == 0 | freq_response == 17, 
+                            "optimizer", "non_optimizer"))
+
+d_filtered %<>% 
+  select(id, face_type, optimizer) %>% 
+  unique() 
+
+n <- d_filtered %>% 
+  group_by(face_type, optimizer) %>% 
+  count()
+
+n %>% kable()
 ```
 
+We are able to reproduce their filtering criteria and can now try to reproduce the descriptive stats.
+
+```{r}
+d_analysis <- left_join(d_tidy_l, d_filtered, by = c("id", "face_type"))
+
+d_analysis %<>% filter(optimizer == "non_optimizer")
+```
+
+Check to make sure we have the correct number of participants.
+
+```{r}
+d_analysis %>% 
+  select(id, face_type, optimizer) %>% 
+  unique() %>% 
+  group_by(face_type, optimizer) %>% 
+  count()
+```
+
+We have the correct number of participants.
 
 ## Step 4: Run analysis
 
@@ -255,7 +272,6 @@ There was also some important information about the computation in the caption o
 
 > The empirical results shown in this table were obtained by first obtaining estimates for each individual, and then averaging the estimates across all participants.
 
-
 ### Descriptive statistics
 
 Store some global variables common across all marginal probabilites 
@@ -264,12 +280,28 @@ Store some global variables common across all marginal probabilites
 n_ss <- 169
 n_cd_trials <- 34
 n_d_alone_trials <- 34
+n_c_alone_trials <- 34
 n_trials_per_face_type <- n_cd_trials / 2
 ```
 
-INSUFFICIENT INFORMATION ERROR
+NB: After the authors sent us the data for the C-alone trials, we can reproduce $p'(G)$ and $p'(B)$.
 
-We can't reproduce $p'(G)$ or $p'(B)$, which is the probability of categorizing a face as good or bad on the categorization only trials (C-alone) because they did not provide these data.
+```{r}
+ss_pgp_pbp <- d_analysis %>% 
+  filter(trial_type == "C-alone") %>% 
+  group_by(id, face_type, attack_decision) %>% 
+  summarise(freq = sum(freq_response),
+            p_ss = freq / n_trials_per_face_type) 
+
+ms_p_g_b_p <- ss_pgp_pbp %>% 
+  group_by(face_type, attack_decision) %>% 
+  summarise(p = mean(p_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) 
+
+ms_p_g_b_p %<>% 
+  spread(key = attack_decision, value = p) %>% 
+  rename(p_b_prime = Attack, p_g_prime = Withdraw)
+```
 
 Get $p(G)$ and $p(B)$, which is equal to the probability of categorizing a face as good or bad on C-D trials.
 
@@ -378,22 +410,113 @@ Try to reproduce the key rows of Table 1:
 ![](figs/table1_key.png)
 
 ```{r}
-ms_p_g_b %>% 
-  mutate(n = NA,p_prime_g = NA) %>%
+ms_p_g_b_p %>% 
+  left_join(., filter(n, optimizer == "non_optimizer")) %>% 
+  left_join(., ms_p_g_b) %>% 
   left_join(., ms_p_ag) %>% 
   left_join(., ms_p_ab) %>% 
   left_join(., ms_p_a) %>% 
   left_join(., ms_pt_a) %>% 
   left_join(., ms_int) %>% 
-  select(face_type, n, p_prime_g, p_g, p_a_given_g, p_b, p_a_given_b, pt_attack, p_attack, int) %>%
+  select(face_type, n, p_g_prime, p_g, p_a_given_g, p_b, p_a_given_b, pt_attack, p_attack, int) %>%
   kable(digits = 2)
 ```
 
-INSUFFICIENT INFORMATION ERROR
-
-It's clear from the `N` column that the descriptive statistics reflect filtered data of some sort (e.g., 169 - 43 = 126), hence we can't reproduce these numbers (see above).  
+NB: After author assistance, we can now reproduce all of the descriptive statistics in rows 3 and 4 of Table 1. 
 
 ### Inferential statistics
+
+Note that the authors did not filter participants for any of the inferential tests, so we need to re-compute all of the probabilities using the unfiltered data. 
+
+```{r}
+######### ss_pg_prime
+ss_pgp_pbp <- d_analysis_unfilt %>% 
+  filter(trial_type == "C-alone") %>% 
+  group_by(id, face_type, attack_decision) %>% 
+  summarise(freq = sum(freq_response),
+            p_ss = freq / n_trials_per_face_type) 
+
+ms_p_g_b_p <- ss_pgp_pbp %>% 
+  group_by(face_type, attack_decision) %>% 
+  summarise(p = mean(p_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) 
+
+ms_p_g_b_p %<>% 
+  spread(key = attack_decision, value = p) %>% 
+  rename(p_b_prime = Attack, p_g_prime = Withdraw)
+
+
+######### ss_pg_pb
+ss_pg_pb <- d_analysis_unfilt %>% 
+  filter(trial_type == "C-D") %>% 
+  group_by(id, face_type, cat_decision) %>% 
+  summarise(freq = sum(freq_response),
+            p_ss = freq / n_trials_per_face_type) 
+
+ms_p_g_b <- ss_pg_pb %>% 
+  group_by(face_type, cat_decision) %>% 
+  summarise(p = mean(p_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) 
+
+ms_p_g_b %<>% 
+  spread(key = cat_decision, value = p) %>% 
+  rename(p_b = Bad, p_g = Good)
+
+######### ss_p_ab
+ss_p_ab <- d_analysis_unfilt %>% 
+  filter(trial_type == "C-D", cat_decision == "Bad") %>%
+  group_by(id, face_type) %>% 
+  mutate(n_trials = sum(freq_response),
+         p_ss = ifelse(n_trials == 0, 0, freq_response / n_trials)) %>% # deal with the divide by zero 
+  filter(attack_decision == "Attack")
+
+ms_p_ab <- ss_p_ab %>% 
+  group_by(face_type, attack_decision) %>% 
+  summarise(p_a_given_b = mean(p_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) %>% 
+  filter(attack_decision == "Attack") %>% 
+  select(face_type, p_a_given_b)
+
+######### ss_pa
+ss_p_a <- d_analysis_unfilt %>% 
+  filter(trial_type == "D-alone", attack_decision == "Attack") %>% 
+  group_by(id, face_type) %>% 
+  mutate(freq_attack = sum(freq_response),
+         p_attack_ss = freq_attack / n_trials_per_face_type)
+
+ms_p_a <- ss_p_a %>% 
+  group_by(face_type) %>% 
+  summarise(p_attack = mean(p_attack_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) 
+
+######### ss_pt_a
+ss_pt_a <- d_analysis_unfilt %>% 
+  filter(trial_type == "C-D", attack_decision == "Attack") %>% 
+  group_by(id, face_type) %>% 
+  mutate(freq_attack = sum(freq_response),
+         pt_attack_ss = freq_attack / n_trials_per_face_type) %>% 
+  select(id, face_type, pt_attack_ss) %>% 
+  distinct(.keep_all = T)
+
+ms_pt_a <- ss_pt_a %>%   
+  group_by(face_type) %>% 
+  summarise(pt_attack = mean(pt_attack_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) 
+
+######### ss_int
+ss_int <- ss_pt_a %>% 
+  select(id, pt_attack_ss, face_type) %>% 
+  left_join(., select(ss_p_a, id, p_attack_ss, face_type)) %>% 
+  distinct(., .keep_all = T) %>% 
+  mutate(int_effect_ss = p_attack_ss - pt_attack_ss)
+
+ms_int <- ss_int %>% 
+  group_by(face_type) %>% 
+  summarise(int = mean(int_effect_ss)) %>% 
+  mutate_if(is.numeric, round, digits = 2) 
+```
+
+Now we can do the statistical tests.
 
 First, the two, separate one-sample t-tests, testing the interfence effect for type $b$ faces ($t(168)=2.24$, $SE=.015$, $p=.027$) and type $g$ faces ($t(168)=.61$, $SE=.013$, $p=.54$) against a null model of no interference effect.
 
@@ -422,9 +545,43 @@ g_t_test
 compareValues(reportedValue = .54, obtainedValue = g_t_test$p.value)
 ```
 
-INSUFFICIENT INFORMATION ERROR
+NB: After author assistance, we can try to compute the correlations between $p(G)$ and $p′(G)$ ($r=.52$, $p<.0001$) or for type $b$ faces, $r=.65$, $p<.0001$ for type $g$ faces)
 
-We can't compute the correlations between $p(G)$ and $p′(G)$ ($r=.52$, $p<.0001$) or for type $b$ faces, $r=.65$, $p<.0001$ for type $g$ faces) because calculating $p′(G)$ requires the C-alone data, which we don't have.
+```{r}
+p_g_b <- ss_pg_pb %>% 
+  filter(face_type == "type_b", cat_decision == "Good") %>% 
+  pull(p_ss)
+
+pg_prime_b <- ss_pgp_pbp %>% 
+  filter(face_type == "type_b", attack_decision == "Withdraw") %>%
+  pull(p_ss)
+
+cor_pg_pgprime_b <- cor.test(p_g_b, pg_prime_b)
+cor_pg_pgprime_b
+```
+
+```{r}
+compareValues(reportedValue = .52, obtainedValue = cor_pg_pgprime_b$estimate)
+```
+
+Do the same thing but for the type $g$ faces.
+
+```{r}
+p_g_g <- ss_pg_pb %>% 
+  filter(face_type == "type_g", cat_decision == "Good") %>% 
+  pull(p_ss)
+
+pg_prime_g <- ss_pgp_pbp %>% 
+  filter(face_type == "type_g", attack_decision == "Withdraw") %>%
+  pull(p_ss)
+
+cor_pg_pgprime_g <- cor.test(p_g_g, pg_prime_g)
+cor_pg_pgprime_g
+```
+
+```{r}
+compareValues(reportedValue = .65, obtainedValue = cor_pg_pgprime_g$estimate)
+```
 
 Correlation between $p(A)$ and $p_T(A)$ for type $b$ faces ($r=.46$, $p<.0001$);
 
@@ -450,7 +607,6 @@ cor_pa_pta_g <- cor.test(p_a_g, pt_a_g)
 cor_pa_pta_g
 ```
 
-
 ```{r}
 compareValues(reportedValue = .51, obtainedValue = cor_pa_pta_g$estimate)
 ```
@@ -473,18 +629,19 @@ compareValues(reportedValue = -.16, obtainedValue = cor_int$estimate)
 ```{r}
 codReport(Report_Type = 'joint',
           Article_ID = 'UlhiU', 
-          Insufficient_Information_Errors = 2,
+          Insufficient_Information_Errors = 0,
           Decision_Errors = 0, 
           Major_Numerical_Errors = 0, 
           Minor_Numerical_Errors = 1, 
-          Author_Assistance = FALSE)
+          Author_Assistance = TRUE)
 ```
 
-In summary, the outcome of this report is a partial failure since we were not able to reproduce the probabilities in Table 2. 
+In summary, the outcome of this report is a success with author assistance. Specifically, the authors provided: 
 
-The two main issues were: (1) the authors did not include the C-alone trials in the published data and (2) we were not able to reproduce the number of participants removed for the two face types using their filtering criterion (and these participants were not flagged in their data file). 
+  1. the C-alone trials that were not present in the published data 
+  2. more information about how to impoement their filtering criterion (these participants were not flagged in their data file). 
 
-In contrast to the descriptive statistics, we were able to reproduce the key inferential statistics from the paper, with only one minor numerical error. 
+With the authors' help, we were able to reproduce all of the descriptive statistics and the key inferential statistics from the paper, with only one minor numerical error. 
 
 ```{r session_info, include=TRUE, echo=TRUE, results='markup'}
 devtools::session_info()
