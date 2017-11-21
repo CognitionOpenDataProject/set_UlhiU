@@ -8,9 +8,11 @@ toc_float: true
 
 #### Article ID: UlhiU
 #### Pilot: Kyle MacDonald
-#### Start date: 4/4/17
-#### End date: 4/10/17
+#### Start date: Apr 4 2017
+#### End date: Nov 21 2017
 #### CoPilot: Mike Frank
+#### Final verification: Tom Hardwicke
+#### Date: Nov 21 2017
 
 -------
 
@@ -43,6 +45,9 @@ We will attempt to reproduce:
 
 ```{r global_options, include=FALSE}
 knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE)
+
+# prepare an empty report object, we will update this each time we run compareValues2()
+reportObject <- data.frame("Article_ID" = NA, "valuesChecked" = 0, "eyeballs" = 0, "Total_df" = 0, "Total_p" = 0, "Total_mean" = 0, "Total_sd" = 0, "Total_se" = 0, "Total_ci" = 0, "Total_bf" = 0, "Total_t" = 0, "Total_F" = 0, "Total_es" = 0, "Total_median" = 0, "Total_irr" = 0, "Total_r" = 0, "Total_z" = 0, "Total_coeff" = 0, "Total_n" = 0, "Total_x2" = 0, "Total_other" = 0, "Insufficient_Information_Errors" = 0, "Decision_Errors" = 0, "Major_Numerical_Errors" = 0, "Minor_Numerical_Errors" = 0, "Major_df" = 0, "Major_p" = 0, "Major_mean" = 0, "Major_sd" = 0, "Major_se" = 0, "Major_ci" = 0, "Major_bf" = 0, "Major_t" = 0, "Major_F" = 0, "Major_es" = 0, "Major_median" = 0, "Major_irr" = 0, "Major_r" = 0, "Major_z" = 0, "Major_coeff" = 0, "Major_n" = 0, "Major_x2" = 0, "Major_other" = 0, "affectsConclusion" = NA, "error_typo" = 0, "error_specification" = 0, "error_analysis" = 0, "error_data" = 0, "error_unidentified" = 0, "Author_Assistance" = NA, "resolved_typo" = 0, "resolved_specification" = 0, "resolved_analysis" = 0, "resolved_data" = 0, "correctionSuggested" = NA, "correctionPublished" = NA)
 ```
 
 ## Step 1: Load packages
@@ -53,8 +58,9 @@ library(knitr) # for kable table formating
 library(haven) # import and export 'SPSS', 'Stata' and 'SAS' Files
 library(readxl) # import excel files
 library(CODreports) # custom report functions
-library(magrittr) 
-library(stringr)
+library(magrittr) # for data munging
+library(stringr) # for string manipulation
+library(plotrix) # for std.error
 ```
 
 ## Step 2: Load data
@@ -69,7 +75,7 @@ Skip reading in the first row since it encodes information about face type and n
 d <- readxl::read_excel("data/data.xlsx", skip = 1)
 ```
 
-NB: Here we reproduce the analyses using two data files provided by the authors after asking for their assistance. 
+NB: The initial data was missing C-alone trials so here we reproduce the analyses using two additional data files provided by the authors after asking for their assistance. 
 
 ```{r}
 d_good <- read.table("authorAssistance/GFq.txt")
@@ -96,7 +102,6 @@ d_bad %<>% mutate(face_type = "type_b",
 # put the data frames back together in "longer" format
 d_tidy <- bind_rows(d_good, d_bad)
 ```
-
 
 Add the frequency of attack responses for the D-alone trials. This information was not included in the dataset, but we know there were 17 test trials for each face type for each participant. From the results section 3.2, 
 
@@ -180,7 +185,7 @@ n_tidy == 169
 
 How many responses do we have for each participant? We don't have data for the C-alone trials, so my best guess is that we should expect 68 total responses for each participant (2 face types X 2 blocks X 17 trials in each block). 
 
-NB: After author assitance, we now have the C-alone trials. So we should expect 102 trials (2 face types X 3 blocks X 17 trials in each block).
+NB: After author assistance, we now have the C-alone trials. So we should expect 102 trials (2 face types X 3 blocks X 17 trials in each block).
 
 ```{r}
 resp_check <- d_tidy_l %>% 
@@ -191,9 +196,7 @@ resp_check <- d_tidy_l %>%
 sum(resp_check) == 169
 ```
 
-Each participant has 68 total responses. Thus, we now have tidy data in long format with the correct number of participants and trials. 
-
-NB: after author assistance we now have all the data (102 trials) for each participant. 
+Each participant has 102 total responses. Thus, we now have tidy data in long format with the correct number of participants and trials. 
 
 Are all participants represented in the data? From Wang & Busmeyer, 
 
@@ -284,7 +287,7 @@ n_c_alone_trials <- 34
 n_trials_per_face_type <- n_cd_trials / 2
 ```
 
-NB: After the authors sent us the data for the C-alone trials, we can reproduce $p'(G)$ and $p'(B)$.
+NB: After the authors sent us the data for the C-alone trials, we can now reproduce $p'(G)$ and $p'(B)$.
 
 ```{r}
 ss_pgp_pbp <- d_analysis %>% 
@@ -410,7 +413,7 @@ Try to reproduce the key rows of Table 1:
 ![](figs/table1_key.png)
 
 ```{r}
-ms_p_g_b_p %>% 
+sumdat <- ms_p_g_b_p %>% 
   left_join(., filter(n, optimizer == "non_optimizer")) %>% 
   left_join(., ms_p_g_b) %>% 
   left_join(., ms_p_ag) %>% 
@@ -418,8 +421,70 @@ ms_p_g_b_p %>%
   left_join(., ms_p_a) %>% 
   left_join(., ms_pt_a) %>% 
   left_join(., ms_int) %>% 
-  select(face_type, n, p_g_prime, p_g, p_a_given_g, p_b, p_a_given_b, pt_attack, p_attack, int) %>%
+  select(face_type, n, p_g_prime, p_g, p_a_given_g, p_b, p_a_given_b, pt_attack, p_attack, int) 
+
+sumdat %>%
   kable(digits = 2)
+```
+
+Check values explicitly:
+
+```{r}
+# type b face
+n <- sumdat %>% filter(face_type == 'type_b') %>% pull(n)
+reportObject <- compareValues2(reportedValue = "126", obtainedValue = n, valueType = 'n')
+
+pg1 <- sumdat %>% filter(face_type == 'type_b') %>% pull(p_g_prime)
+reportObject <- compareValues2(reportedValue = ".20", obtainedValue = pg1, valueType = 'n')
+
+pg2 <- sumdat %>% filter(face_type == 'type_b') %>% pull(p_g)
+reportObject <- compareValues2(reportedValue = ".21", obtainedValue = pg2, valueType = 'n')
+
+pag <- sumdat %>% filter(face_type == 'type_b') %>% pull(p_a_given_g)
+reportObject <- compareValues2(reportedValue = ".41", obtainedValue = pag, valueType = 'n')
+
+pb <- sumdat %>% filter(face_type == 'type_b') %>% pull(p_b)
+reportObject <- compareValues2(reportedValue = ".79", obtainedValue = pb, valueType = 'n')
+
+pab <- sumdat %>% filter(face_type == 'type_b') %>% pull(p_a_given_b)
+reportObject <- compareValues2(reportedValue = ".58", obtainedValue = pab, valueType = 'n')
+
+pra <- sumdat %>% filter(face_type == 'type_b') %>% pull(pt_attack)
+reportObject <- compareValues2(reportedValue = ".55", obtainedValue = pra, valueType = 'n')
+
+pa <- sumdat %>% filter(face_type == 'type_b') %>% pull(p_attack)
+reportObject <- compareValues2(reportedValue = ".59", obtainedValue = pa, valueType = 'n')
+
+int <- sumdat %>% filter(face_type == 'type_b') %>% pull(int)
+reportObject <- compareValues2(reportedValue = ".04", obtainedValue = int, valueType = 'n')
+
+# type g face
+n <- sumdat %>% filter(face_type == 'type_g') %>% pull(n)
+reportObject <- compareValues2(reportedValue = "138", obtainedValue = n, valueType = 'n')
+
+pg1 <- sumdat %>% filter(face_type == 'type_g') %>% pull(p_g_prime)
+reportObject <- compareValues2(reportedValue = ".79", obtainedValue = pg1, valueType = 'n')
+
+pg2 <- sumdat %>% filter(face_type == 'type_g') %>% pull(p_g)
+reportObject <- compareValues2(reportedValue = ".78", obtainedValue = pg2, valueType = 'n')
+
+pag <- sumdat %>% filter(face_type == 'type_g') %>% pull(p_a_given_g)
+reportObject <- compareValues2(reportedValue = ".39", obtainedValue = pag, valueType = 'n')
+
+pb <- sumdat %>% filter(face_type == 'type_g') %>% pull(p_b)
+reportObject <- compareValues2(reportedValue = ".22", obtainedValue = pb, valueType = 'n')
+
+pab <- sumdat %>% filter(face_type == 'type_g') %>% pull(p_a_given_b)
+reportObject <- compareValues2(reportedValue = ".52", obtainedValue = pab, valueType = 'n')
+
+pra <- sumdat %>% filter(face_type == 'type_g') %>% pull(pt_attack)
+reportObject <- compareValues2(reportedValue = ".41", obtainedValue = pra, valueType = 'n')
+
+pa <- sumdat %>% filter(face_type == 'type_g') %>% pull(p_attack)
+reportObject <- compareValues2(reportedValue = ".42", obtainedValue = pa, valueType = 'n')
+
+int <- sumdat %>% filter(face_type == 'type_g') %>% pull(int)
+reportObject <- compareValues2(reportedValue = ".01", obtainedValue = int, valueType = 'n')
 ```
 
 NB: After author assistance, we can now reproduce all of the descriptive statistics in rows 3 and 4 of Table 1. 
@@ -526,10 +591,18 @@ b_t_test <- ss_int %>%
   .$int_effect_ss %>% 
   t.test(., mu = 0)
 b_t_test
+
+se <- ss_int %>% 
+  filter(face_type == "type_b") %>% 
+  .$int_effect_ss %>% 
+  std.error()
 ```
 
 ```{r}
-compareValues(reportedValue = .027, obtainedValue = b_t_test$p.value)
+reportObject <- compareValues2(reportedValue = "168", obtainedValue = b_t_test$parameter, valueType = 'df')
+reportObject <- compareValues2(reportedValue = "2.24", obtainedValue = b_t_test$statistic, valueType = 't')
+reportObject <- compareValues2(reportedValue = ".027", obtainedValue = b_t_test$p.value, valueType = 'p')
+reportObject <- compareValues2(reportedValue = ".015", obtainedValue = se, valueType = 'se')
 ```
 
 ```{r}
@@ -539,10 +612,18 @@ g_t_test <- ss_int %>%
   t.test(., mu = 0)
 
 g_t_test
+
+se <- ss_int %>% 
+  filter(face_type == "type_g") %>% 
+  .$int_effect_ss %>% 
+  std.error()
 ```
 
 ```{r}
-compareValues(reportedValue = .54, obtainedValue = g_t_test$p.value)
+reportObject <- compareValues2(reportedValue = "168", obtainedValue = g_t_test$parameter, valueType = 'df')
+reportObject <- compareValues2(reportedValue = ".61", obtainedValue = g_t_test$statistic, valueType = 't')
+reportObject <- compareValues2(reportedValue = ".54", obtainedValue = g_t_test$p.value, valueType = 'p')
+reportObject <- compareValues2(reportedValue = ".013", obtainedValue = se, valueType = 'se')
 ```
 
 NB: After author assistance, we can try to compute the correlations between $p(G)$ and $p′(G)$ ($r=.52$, $p<.0001$) or for type $b$ faces, $r=.65$, $p<.0001$ for type $g$ faces)
@@ -561,7 +642,8 @@ cor_pg_pgprime_b
 ```
 
 ```{r}
-compareValues(reportedValue = .52, obtainedValue = cor_pg_pgprime_b$estimate)
+reportObject <- compareValues2(reportedValue = ".52", obtainedValue = cor_pg_pgprime_b$estimate, valueType = 'r')
+reportObject <- compareValues2(reportedValue = "eyeballMATCH", obtainedValue = cor_pg_pgprime_b$p.value, valueType = 'p')
 ```
 
 Do the same thing but for the type $g$ faces.
@@ -580,7 +662,8 @@ cor_pg_pgprime_g
 ```
 
 ```{r}
-compareValues(reportedValue = .65, obtainedValue = cor_pg_pgprime_g$estimate)
+reportObject <- compareValues2(reportedValue = ".65", obtainedValue = cor_pg_pgprime_g$estimate, valueType = 'r')
+reportObject <- compareValues2(reportedValue = "eyeballMATCH", obtainedValue = cor_pg_pgprime_g$p.value, valueType = 'p')
 ```
 
 Correlation between $p(A)$ and $p_T(A)$ for type $b$ faces ($r=.46$, $p<.0001$);
@@ -595,7 +678,8 @@ cor_pa_pta_b
 ```
 
 ```{r}
-compareValues(reportedValue = .46, obtainedValue = cor_pa_pta_b$estimate)
+reportObject <- compareValues2(reportedValue = ".46", obtainedValue = cor_pa_pta_b$estimate, valueType = 'r')
+reportObject <- compareValues2(reportedValue = "eyeballMATCH", obtainedValue = cor_pa_pta_b$p.value, valueType = 'p')
 ```
 
 Correlation between $p(A)$ and $p_T(A)$ for type $g$ faces ($r=.51$, $p<.0001$ for type $g$ faces). 
@@ -608,7 +692,8 @@ cor_pa_pta_g
 ```
 
 ```{r}
-compareValues(reportedValue = .51, obtainedValue = cor_pa_pta_g$estimate)
+reportObject <- compareValues2(reportedValue = ".51", obtainedValue = cor_pa_pta_g$estimate, valueType = 'r')
+reportObject <- compareValues2(reportedValue = "eyeballMATCH", obtainedValue = cor_pa_pta_g$p.value, valueType = 'p')
 ```
 
 Correlation between the interference effects produced by the two different types of faces ($r=-.16$, $p=.04$). 
@@ -621,28 +706,69 @@ cor_int
 ```
 
 ```{r}
-compareValues(reportedValue = -.16, obtainedValue = cor_int$estimate)
+reportObject <- compareValues2(reportedValue = "-.16", obtainedValue = cor_int$estimate, valueType = 'r')
+reportObject <- compareValues2(reportedValue = "0.04", obtainedValue = cor_int$p.value, valueType = 'p')
 ```
 
 ## Step 5: Conclusion
 
-```{r}
-codReport(Report_Type = 'joint',
-          Article_ID = 'UlhiU', 
-          Insufficient_Information_Errors = 0,
-          Decision_Errors = 0, 
-          Major_Numerical_Errors = 0, 
-          Minor_Numerical_Errors = 1, 
-          Author_Assistance = TRUE)
-```
-
 In summary, the outcome of this report is a success with author assistance. Specifically, the authors provided: 
 
   1. the C-alone trials that were not present in the published data 
-  2. more information about how to impoement their filtering criterion (these participants were not flagged in their data file). 
+  2. more information about how to impement their filtering criterion (these participants were not flagged in their data file). 
 
-With the authors' help, we were able to reproduce all of the descriptive statistics and the key inferential statistics from the paper, with only one minor numerical error. 
+With the authors' help, we were able to reproduce all of the descriptive statistics and the key inferential statistics from the paper, with only a couple of minor numerical errors. 
 
+```{r}
+reportObject$Article_ID <- "UlhiU"
+reportObject$affectsConclusion <- NA
+reportObject$error_typo <- 0
+reportObject$error_specification <- 0
+reportObject$error_analysis <- 0
+reportObject$error_data <- 0
+reportObject$error_unidentified <- 0
+reportObject$Author_Assistance <- T
+reportObject$resolved_typo <- 0
+reportObject$resolved_specification <- 1
+reportObject$resolved_analysis <- 0
+reportObject$resolved_data <- 1
+reportObject$correctionSuggested <- "no"
+reportObject$correctionPublished <- F
+
+# decide on final outcome
+if(reportObject$Decision_Errors > 0 | reportObject$Major_Numerical_Errors > 0 | reportObject$Insufficient_Information_Errors > 0){
+  reportObject$finalOutcome <- "Failure"
+  if(reportObject$Author_Assistance == T){
+    reportObject$finalOutcome <- "Failure despite author assistance"
+  }
+}else{
+  reportObject$finalOutcome <- "Success"
+  if(reportObject$Author_Assistance == T){
+    reportObject$finalOutcome <- "Success with author assistance"
+  }
+}
+
+# save the report object
+filename <- paste0("reportObject_", reportObject$Article_ID,".csv")
+write_csv(reportObject, filename)
+```
+
+## Report Object
+
+```{r, echo = FALSE}
+# display report object in chunks
+kable(reportObject[2:10], align = 'l')
+kable(reportObject[11:20], align = 'l')
+kable(reportObject[21:25], align = 'l')
+kable(reportObject[26:30], align = 'l')
+kable(reportObject[31:35], align = 'l')
+kable(reportObject[36:40], align = 'l')
+kable(reportObject[41:45], align = 'l')
+kable(reportObject[46:51], align = 'l')
+kable(reportObject[52:57], align = 'l')
+```
+
+## Session information
 ```{r session_info, include=TRUE, echo=TRUE, results='markup'}
 devtools::session_info()
 ```
