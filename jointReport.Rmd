@@ -30,7 +30,7 @@ We will attempt to reproduce:
 
 ![](figs/table1.png)
 
-2. the two, separate one-sample $t$-tests, testing the interfence effect for type $b$ faces ($t(168)=2.24$, $SE=.015$, $p=.027$) and type $g$ faces ($t(168)=.61$, $SE=.013$, $p=.54$) against a null model of no intereference effect.
+2. the two, separate one-sample $t$-tests, testing the interfence effect for type $b$ faces ($t(168)=2.24$, $SE=.015$, $p=.027$) and type $g$ faces ($t(168)=.61$, $SE=.013$, $p=.54$) against a null model of no interference effect.
 
 3. the following correlations:
 - between $p(G)$ and $p′(G)$ ($r=.52$, $p<.0001$ for type $b$ faces, $r=.65$, $p<.0001$ for type $g$ faces); 
@@ -69,6 +69,28 @@ Skip reading in the first row since it encodes information about face type and n
 d <- readxl::read_excel("data/data.xlsx", skip = 1)
 ```
 
+KM: Here we are trying to reproduce the analyses using two data files provided by the authors after asking for their assistance. 
+
+```{r}
+d_good <- read.table("authorAssistance/GFq.txt")
+colnames(d_good) <- c("Good&Friendly", "Good&Attack",	"Bad&Friendly",	
+                      "Bad&Attack",	"Friendly (D-alone)", "Friendly (C-alone)")
+
+# bad face types
+d_bad <- read.table("authorAssistance/BFq.txt")
+colnames(d_bad) <- c("Good&Friendly", "Good&Attack", "Bad&Friendly",	
+                     "Bad&Attack",	"Friendly (D-alone)", "Friendly (C-alone)")
+
+# add the face type 
+d_good %<>% mutate(face_type = "type_g",
+                   id = 1:n())
+d_bad %<>% mutate(face_type = "type_b",
+                  id = 1:n())  
+
+# put the data frames back together in "longer" format
+d_tidy <- bind_rows(d_good, d_bad)
+```
+
 ## Step 3: Tidy data
 
 Add a participant ID column, so we don't lose this information when we convert from wide to long format in Step 3. Each row is data for an individual participant.
@@ -105,7 +127,8 @@ So to get the frequency of attack responses, subtract the frequency of withdrawi
 n_test_trials_per_face <- 17
 
 d_tidy %<>% 
-  mutate(`Attack (D-alone)` = n_test_trials_per_face - `Friendly (D-alone)`)
+  mutate(`Attack (D-alone)` = n_test_trials_per_face - `Friendly (D-alone)`,
+         `Attack (C-alone)` = n_test_trials_per_face - `Friendly (C-alone)`)
 ```
 
 Convert from wide format to long format using the `tidyr::gather` function.
@@ -114,7 +137,7 @@ Convert from wide format to long format using the `tidyr::gather` function.
 d_tidy_l <- d_tidy %>% 
   gather(key = trial_info, 
          value = freq_response, 
-         `Good&Friendly`:`Friendly (D-alone)`, `Attack (D-alone)`) 
+         `Good&Friendly`:`Friendly (C-alone)`, `Attack (D-alone)`:`Attack (C-alone)`) 
 ```
 
 Add information about C-D vs. D-alone trials. This is also specified by column position in the original data: 1-4 and 6-9 are C-D trials; 5 and 10 are D-alone trials. I am going to take advantage of the fact that the character `&` only occurs in the C-D variable names
@@ -122,8 +145,9 @@ Add information about C-D vs. D-alone trials. This is also specified by column p
 ```{r}
 d_tidy_l %<>% 
   mutate(trial_type = ifelse(str_detect(trial_info, 
-                                        pattern = "&"), 
-                             "C-D", "D-alone"))
+                                        pattern = "&"), "C-D", 
+                             ifelse(str_detect(trial_info, pattern = "D-alone"), "D-alone",
+                                    "C-alone")))
 ```
 
 Clean up the trial name variable to remove spaces and special characters.
@@ -135,6 +159,9 @@ d_tidy_l %<>%
                            replacement = "_")) %>% 
   mutate(trial_info = gsub(.$trial_info, 
                            pattern = " \\(D-alone\\)", 
+                           replacement = "")) %>% 
+   mutate(trial_info = gsub(.$trial_info, 
+                           pattern = " \\(C-alone\\)", 
                            replacement = ""))
 ```
 
@@ -172,18 +199,22 @@ n_tidy == nrow(d)
 
 How many responses do we have for each participant? We don't have data for the C-alone trials, so my best guess is that we should expect 68 total responses for each participant (2 face types X 2 blocks X 17 trials in each block). 
 
+NB: After author assitance, we now have the C-alone trials. So we should expect 102 trials (2 face types X 3 blocks X 17 trials in each block).
+
 ```{r}
 resp_check <- d_tidy_l %>% 
   group_by(id) %>% 
   summarise(n_resp = sum(freq_response)) %>% 
-  .$n_resp == 68 
+  .$n_resp == 102 
 
 sum(resp_check) == 169
 ```
 
 Each participant has 68 total responses. Thus, we now have tidy data in long format with the correct number of participants and trials. 
 
-Are all participantse represented in the data? From Wang & Busmeyer, 
+NB: after author assistance we now have 102 trials for each participant. 
+
+Are all participants represented in the data? From Wang & Busmeyer, 
 
 > Some participants, whom we call "optimizers," always chose the "optimal" category for a particular type of face on C-D trials: 43 did so for the narrow faces and 31 did so for the wide faces (approximately 25% and 18%, respectively, of the 169 participants). These participants obey the law of total probability for either type of face for trivial reasons, and for these participants, we cannot estimate the conditional probabilities for non-chosen categories and thus cannot really estimate the total probability for an action decision. (p. 137)
 
@@ -202,6 +233,17 @@ In any case, we move forward with the full, unfiltered dataset.
 ```{r}
 d_analysis <- d_tidy_l
 ```
+
+NB: After author assistance, we can better implement their filtering criteria. Specifically, they say: 
+
+> We only included participants that made at least one incorrect categorization of a type of face. That is: Only Ps that categorized Good at least once when face was b = bad guy type face. Only Ps that categorized Bad at least once when face was g = good guy type face.
+
+So we filter out participants who did not make any incorrect classifications for either the good or bad face types. We expect that: $N_{bad} = 126 = 169 - 43$ and $N_{good} = 138 = 169 - 31$
+
+```{r}
+d_tidy_l %>% 
+```
+
 
 ## Step 4: Run analysis
 
@@ -367,7 +409,6 @@ b_t_test
 compareValues(reportedValue = .027, obtainedValue = b_t_test$p.value)
 ```
 
-
 ```{r}
 g_t_test <- ss_int %>% 
   filter(face_type == "type_g") %>% 
@@ -423,10 +464,10 @@ cor_int <- cor.test(int_type_b, int_type_g)
 cor_int
 ```
 
-
 ```{r}
 compareValues(reportedValue = -.16, obtainedValue = cor_int$estimate)
 ```
+
 ## Step 5: Conclusion
 
 ```{r}
